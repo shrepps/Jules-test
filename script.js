@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Store detected bass hit timestamps and their processed state for shake
     let bassHits = []; // Array of objects: { time: number, shaken: boolean }
+    let currentBassEnergyForVibration = 0; // For continuous vibration effect
 
     const BASS_FREQ_MIN = 20; // Hz
     const BASS_FREQ_MAX = 140; // Hz, broadened slightly
@@ -157,6 +158,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     bassEnergy += dataArray[i];
                 }
                 const averageBassEnergy = bassEnergy / (maxBin - minBin + 1);
+                currentBassEnergyForVibration = averageBassEnergy; // Update continuous energy
                 const currentTime = videoPlayer.currentTime;
 
                 if (averageBassEnergy > PEAK_THRESHOLD && (currentTime - lastPeakTime) > MIN_PEAK_INTERVAL) {
@@ -168,48 +170,70 @@ document.addEventListener('DOMContentLoaded', () => {
                         lastPeakTime = currentTime;
                     }
                 }
+            } else {
+                currentBassEnergyForVibration = 0; // No energy if bins are invalid
             }
             animationFrameId = requestAnimationFrame(processFrame);
         }
         processFrame(); // Start the loop
     }
 
-    function applyScreenShake() {
-        if (!videoPlayer.classList.contains('shake')) {
-            videoPlayer.classList.add('shake');
-            setTimeout(() => {
-                videoPlayer.classList.remove('shake');
-            }, SHAKE_DURATION_MS);
+    // --- Vibration Effect Parameters ---
+    // PEAK_THRESHOLD is defined earlier (e.g., 190)
+
+    // Max pixels for vibration displacement.
+    const VIBRATION_MAX_AMPLITUDE = 2;
+
+    // Bass energy must be above this threshold for vibration to start.
+    // Lowered for more sensitivity to mimic speaker vibration even for quieter bass.
+    const VIBRATION_ENERGY_THRESHOLD = PEAK_THRESHOLD * 0.20;
+
+    // Bass energy level that maps to maximum vibration amplitude.
+    // Set to PEAK_THRESHOLD so a detected "peak hit" causes max configured vibration.
+    const VIBRATION_ENERGY_MAX_SCALE = PEAK_THRESHOLD * 1.0;
+    // --- End Vibration Effect Parameters ---
+
+    function applyLiveVibration() {
+        if (!videoPlayer || videoPlayer.paused || videoPlayer.seeking) {
+            videoPlayer.style.transform = 'translate(0, 0)'; // Reset if not active
+            return;
+        }
+
+        // Normalize energy: 0 if below threshold, 1 if at or above max_scale, linear in between
+        let normalizedEnergy = 0;
+        if (currentBassEnergyForVibration > VIBRATION_ENERGY_THRESHOLD) {
+            normalizedEnergy = Math.min(1, (currentBassEnergyForVibration - VIBRATION_ENERGY_THRESHOLD) / (VIBRATION_ENERGY_MAX_SCALE - VIBRATION_ENERGY_THRESHOLD));
+        }
+
+        if (normalizedEnergy > 0) {
+            const dx = (Math.random() - 0.5) * 2 * VIBRATION_MAX_AMPLITUDE * normalizedEnergy;
+            const dy = (Math.random() - 0.5) * 2 * VIBRATION_MAX_AMPLITUDE * normalizedEnergy;
+            videoPlayer.style.transform = `translate(${dx.toFixed(2)}px, ${dy.toFixed(2)}px)`;
+        } else {
+            videoPlayer.style.transform = 'translate(0, 0)'; // Reset to no shake
         }
     }
 
+
+    // This function is called by videoPlayer.ontimeupdate
     function triggerShakeForCurrentTime() {
-        if (!videoPlayer || videoPlayer.paused || videoPlayer.seeking) return;
+        // The old discrete shake logic based on bassHits is now replaced by continuous vibration
+        applyLiveVibration();
 
-        const currentTime = videoPlayer.currentTime;
-        // A small window to catch the event
-        const timeWindow = Math.max(0.05, SHAKE_DURATION_MS / 1000); // Window based on shake duration or min 50ms
-
-        for (let i = 0; i < bassHits.length; i++) {
-            const hit = bassHits[i];
-            // Check if current time is within [hit.time, hit.time + timeWindow]
-            // and the hit hasn't been processed for shaking yet.
-            if (!hit.shaken && currentTime >= hit.time && currentTime < hit.time + timeWindow) {
-                applyScreenShake();
-                hit.shaken = true; 
-                // console.log(`Shake applied for hit at ${hit.time.toFixed(3)}s (current: ${currentTime.toFixed(3)}s)`);
-            }
-            // If video has played past a hit time by more than the window,
-            // and it wasn't shaken (e.g. due to lag or seeking past it quickly),
-            // mark it as shaken to prevent it from triggering if the user seeks back to just before it.
-            // This behavior can be adjusted based on desired outcome when seeking.
-            else if (!hit.shaken && currentTime >= hit.time + timeWindow) {
-                // hit.shaken = true; // Optional: Mark as "missed"
-            }
-             // Optimization: if current time is way past earliest non-shaken hits,
-             // we could potentially break early if bassHits is always sorted.
-             // But for simplicity and small arrays, iterating through all is fine.
-        }
+        // We can keep the old logic for `bassHits[].shaken` if we want to re-introduce
+        // the "fizzle" effect for discrete hits on top of vibration, or for other purposes.
+        // For now, the primary live effect is the vibration.
+        // If you want to keep the old discrete shake as well, you would call its logic here.
+        // Example:
+        // const currentTime = videoPlayer.currentTime;
+        // const timeWindow = Math.max(0.05, SHAKE_DURATION_MS / 1000);
+        // for (let i = 0; i < bassHits.length; i++) {
+        //     const hit = bassHits[i];
+        //     if (!hit.shaken && currentTime >= hit.time && currentTime < hit.time + timeWindow) {
+        //         // applyLegacyShake(); // A renamed version of the old applyScreenShake
+        //         hit.shaken = true;
+        //     }
+        // }
     }
     
     // Expose for potential use if other modules need it (e.g. for debugging from console)
@@ -337,44 +361,22 @@ document.addEventListener('DOMContentLoaded', () => {
             // Apply shake if needed
             const currentTime = videoPlayer.currentTime;
             const timeWindow = Math.max(0.05, SHAKE_DURATION_MS / 1000);
-            let currentShakeIntensity = 0; // 0 means no shake, 1 means full shake
-            let timeSinceLastApplicableHit = Infinity;
-
-            for (let i = 0; i < bassHits.length; i++) {
-                const hit = bassHits[i];
-                const timeSinceHitStart = currentTime - hit.time;
-
-                // Check if current time is within this hit's shake duration
-                if (timeSinceHitStart >= 0 && timeSinceHitStart < (SHAKE_DURATION_MS / 1000)) {
-                    // Calculate how far into the shake duration we are (0.0 to 1.0)
-                    const progress = timeSinceHitStart / (SHAKE_DURATION_MS / 1000);
-                    // Intensity decreases linearly from 1 to 0 over the duration
-                    const intensityForThisHit = 1.0 - progress;
-
-                    // We want the strongest shake if multiple hits overlap or are very close
-                    if (intensityForThisHit > currentShakeIntensity) {
-                        currentShakeIntensity = intensityForThisHit;
-                    }
-                }
+            // Use the same constants and logic as applyLiveVibration for consistency
+            let normalizedEnergy = 0;
+            if (currentBassEnergyForVibration > VIBRATION_ENERGY_THRESHOLD) {
+                normalizedEnergy = Math.min(1, (currentBassEnergyForVibration - VIBRATION_ENERGY_THRESHOLD) / (VIBRATION_ENERGY_MAX_SCALE - VIBRATION_ENERGY_THRESHOLD));
             }
 
-            if (currentShakeIntensity > 0) {
-                // Max shake strength (pixels for translation, degrees for rotation)
-                const maxShakeTranslation = 7;
-                const maxShakeRotation = 1.5; // degrees
-
-                // Modulate actual shake by currentShakeIntensity
-                // Make it more random and less smooth than a simple linear decrease
-                const randomFactor = 0.5 + Math.random() * 0.5; // Add some randomness to magnitude
-                const dx = (Math.random() - 0.5) * 2 * maxShakeTranslation * currentShakeIntensity * randomFactor;
-                const dy = (Math.random() - 0.5) * 2 * maxShakeTranslation * currentShakeIntensity * randomFactor;
-                const dAngle = (Math.random() - 0.5) * 2 * maxShakeRotation * currentShakeIntensity * randomFactor;
+            if (normalizedEnergy > 0) {
+                const dx = (Math.random() - 0.5) * 2 * VIBRATION_MAX_AMPLITUDE * normalizedEnergy;
+                const dy = (Math.random() - 0.5) * 2 * VIBRATION_MAX_AMPLITUDE * normalizedEnergy;
+                // Rotation is omitted for a pure vibration feel, matching the live effect change
 
                 ctx.save();
-                ctx.translate(canvas.width / 2, canvas.height / 2);
+                // Apply translation relative to the center for a more natural vibration
+                // Or apply directly if preferred: ctx.translate(dx, dy); ctx.drawImage(videoPlayer, 0,0,...)
                 ctx.translate(dx, dy);
-                ctx.rotate(dAngle * Math.PI / 180);
-                ctx.drawImage(videoPlayer, -canvas.width / 2, -canvas.height / 2, canvas.width, canvas.height);
+                ctx.drawImage(videoPlayer, 0, 0, canvas.width, canvas.height);
                 ctx.restore();
             } else {
                 ctx.drawImage(videoPlayer, 0, 0, canvas.width, canvas.height);

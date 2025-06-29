@@ -63,8 +63,10 @@ video {
     100% { transform: translate(0, 0) rotate(0deg); } /* End calm */
 }
 
+/* The .shake class will now be mostly a marker,
+   or could be removed if JS handles all transform states.
+   For now, let's leave it but remove the animation property. */
 .shake {
-    animation: screenShakeFizzle 0.18s linear; /* Duration tied to SHAKE_DURATION_MS */
-    /* Ensure the animation runs once and stays on the final frame if needed,
-       but for shake, it should return to normal. */
+    /* animation: screenShakeFizzle 0.18s linear; */
+    /* Styles previously here are now handled by JS or are default */
 }
