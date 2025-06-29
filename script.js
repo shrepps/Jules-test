@@ -2,6 +2,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const videoUpload = document.getElementById('videoUpload');
     const videoPlayer = document.getElementById('videoPlayer');
     const bassHitsList = document.getElementById('bassHitsList');
+    const downloadButton = document.getElementById('downloadButton');
 
     let audioContext;
     let analyser;
@@ -116,8 +117,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             sourceNode.connect(lowPassFilter);
             lowPassFilter.connect(analyser);
-            // To hear the filtered bass for debugging:
-            // analyser.connect(audioContext.destination); 
+            // To hear the audio:
+            analyser.connect(audioContext.destination);
             
             console.log("Audio processing pipeline set up.");
             if (bassHitsList.innerHTML.includes('Processing audio...')) {
@@ -222,4 +223,201 @@ document.addEventListener('DOMContentLoaded', () => {
         BASS_FREQ_MAX,
         BASS_FREQ_MIN
     };
+
+    downloadButton.addEventListener('click', async () => {
+        if (!videoPlayer.src || bassHits.length === 0) {
+            alert("Please upload a video and ensure bass hits are detected before downloading.");
+            return;
+        }
+
+        downloadButton.disabled = true;
+        downloadButton.textContent = "Processing video...";
+
+        const originalMuted = videoPlayer.muted;
+        const originalTime = videoPlayer.currentTime;
+        const originalPlaybackRate = videoPlayer.playbackRate;
+
+        videoPlayer.muted = true; // Mute main player to avoid double audio if canvas also plays audio
+        videoPlayer.currentTime = 0;
+        videoPlayer.playbackRate = 1; // Ensure normal speed for recording
+
+        const canvas = document.createElement('canvas');
+        canvas.width = videoPlayer.videoWidth;
+        canvas.height = videoPlayer.videoHeight;
+        const ctx = canvas.getContext('2d');
+
+        const recordedChunks = [];
+        // Attempt to capture audio directly from the original video source for the recording
+        let audioStream = null;
+        let mixedStream = null;
+        const canvasStream = canvas.captureStream(30); // 30 FPS for video
+
+        if (videoPlayer.captureStream) { // Standard
+            audioStream = videoPlayer.captureStream().getAudioTracks()[0];
+        } else if (videoPlayer.mozCaptureStream) { // Firefox
+            audioStream = videoPlayer.mozCaptureStream().getAudioTracks()[0];
+        }
+
+        if (audioStream) {
+            mixedStream = new MediaStream([...canvasStream.getVideoTracks(), audioStream]);
+        } else {
+            mixedStream = canvasStream; // No audio track from video, proceed with video only
+            console.warn("Could not capture audio track from video. Downloaded video might be silent.");
+        }
+
+        const mediaRecorder = new MediaRecorder(mixedStream, {
+            mimeType: 'video/webm; codecs=vp9,opus' // VP9 for video, Opus for audio
+        });
+
+        mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+                recordedChunks.push(event.data);
+            }
+        };
+
+        mediaRecorder.onstop = () => {
+            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'video_with_shake.webm';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            // Restore video player state
+            videoPlayer.muted = originalMuted;
+            videoPlayer.currentTime = originalTime;
+            videoPlayer.playbackRate = originalPlaybackRate;
+            downloadButton.disabled = false;
+            downloadButton.textContent = "Download Video with Shake";
+            console.log("Video processing complete and download triggered.");
+        };
+
+        mediaRecorder.onerror = (event) => {
+            console.error("MediaRecorder error:", event.error);
+            alert("Error during video recording. Check console for details.");
+            videoPlayer.muted = originalMuted;
+            videoPlayer.currentTime = originalTime;
+            videoPlayer.playbackRate = originalPlaybackRate;
+            downloadButton.disabled = false;
+            downloadButton.textContent = "Download Video with Shake";
+        };
+
+        mediaRecorder.start();
+        console.log("MediaRecorder started. Canvas dimensions:", canvas.width, "x", canvas.height);
+
+
+        // Reset shaken state for all hits before processing
+        bassHits.forEach(hit => hit.shakenForDownload = false);
+
+        function processFrameForDownload() {
+            if (videoPlayer.paused || videoPlayer.ended) {
+                // If video ends or is paused externally, attempt to finalize.
+                if (mediaRecorder.state === "recording") {
+                    mediaRecorder.stop();
+                }
+                return;
+            }
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear canvas
+
+            // Apply shake if needed
+            const currentTime = videoPlayer.currentTime;
+            const timeWindow = Math.max(0.05, SHAKE_DURATION_MS / 1000);
+            let isShakingThisFrame = false;
+
+            for (let i = 0; i < bassHits.length; i++) {
+                const hit = bassHits[i];
+                 // Check if current time is within [hit.time, hit.time + SHAKE_DURATION_MS/1000]
+                if (currentTime >= hit.time && currentTime < hit.time + (SHAKE_DURATION_MS / 1000)) {
+                    isShakingThisFrame = true;
+                    break;
+                }
+            }
+
+            if (isShakingThisFrame) {
+                const shakeIntensity = 5; // pixels for translation, degrees for rotation
+                const dx = (Math.random() - 0.5) * 2 * shakeIntensity;
+                const dy = (Math.random() - 0.5) * 2 * shakeIntensity;
+                const dAngle = (Math.random() - 0.5) * 2 * (shakeIntensity / 2); // Smaller rotation
+
+                ctx.save();
+                ctx.translate(canvas.width / 2, canvas.height / 2);
+                ctx.translate(dx, dy);
+                ctx.rotate(dAngle * Math.PI / 180);
+                ctx.drawImage(videoPlayer, -canvas.width / 2, -canvas.height / 2, canvas.width, canvas.height);
+                ctx.restore();
+            } else {
+                ctx.drawImage(videoPlayer, 0, 0, canvas.width, canvas.height);
+            }
+
+            // Request next frame. Using requestVideoFrameCallback if available for better sync.
+            if ('requestVideoFrameCallback' in videoPlayer) {
+                videoPlayer.requestVideoFrameCallback(processFrameForDownload);
+            } else {
+                // Fallback for browsers that don't support requestVideoFrameCallback
+                // This might be less perfectly synced.
+                requestAnimationFrame(processFrameForDownload);
+            }
+        }
+
+        videoPlayer.onseeked = () => {
+            // Ensure processing starts after seek is complete
+            if (videoPlayer.currentTime === 0 && mediaRecorder.state === "recording") {
+                 console.log("Video seeked to beginning, starting frame processing for download.");
+                if ('requestVideoFrameCallback' in videoPlayer) {
+                    videoPlayer.requestVideoFrameCallback(processFrameForDownload);
+                } else {
+                    requestAnimationFrame(processFrameForDownload);
+                }
+            }
+        };
+
+        // Listen for the 'ended' event on the video player to stop the MediaRecorder
+        const onVideoEndedForDownload = () => {
+            console.log("Video ended during download process.");
+            if (mediaRecorder.state === "recording") {
+                mediaRecorder.stop();
+            }
+            videoPlayer.removeEventListener('ended', onVideoEndedForDownload); // Clean up listener
+            videoPlayer.removeEventListener('pause', onVideoPausedForDownload);
+        };
+        const onVideoPausedForDownload = () => {
+            // If user manually pauses, or something else pauses it.
+             console.log("Video paused during download process.");
+            if (mediaRecorder.state === "recording" && !videoPlayer.ended) {
+                // Consider if we should stop or wait. For now, stop.
+                // mediaRecorder.stop();
+                // This might be problematic if it's a temporary pause.
+                // For now, we let processFrameForDownload handle this.
+            }
+        };
+
+        videoPlayer.addEventListener('ended', onVideoEndedForDownload);
+        videoPlayer.addEventListener('pause', onVideoPausedForDownload);
+
+
+        // Start playback to trigger frame processing
+        try {
+            await videoPlayer.play(); // Play to start generating frames
+             console.log("Video playback started for recording.");
+             if (videoPlayer.currentTime === 0 && mediaRecorder.state === "recording") {
+                // If already at the start and play() doesn't immediately trigger a frame, kickstart it.
+                if ('requestVideoFrameCallback' in videoPlayer) {
+                    videoPlayer.requestVideoFrameCallback(processFrameForDownload);
+                } else {
+                    requestAnimationFrame(processFrameForDownload);
+                }
+            }
+        } catch (err) {
+            console.error("Error playing video for recording:", err);
+            alert("Could not start video playback for recording. See console.");
+            mediaRecorder.stop(); // Stop recorder if play fails
+            videoPlayer.muted = originalMuted; // Restore
+            downloadButton.disabled = false;
+            downloadButton.textContent = "Download Video with Shake";
+        }
+    });
 });
