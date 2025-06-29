@@ -48,20 +48,23 @@ video {
 }
 
 /* Screen Shake Effect */
-@keyframes screenShake {
-    0% { transform: translate(0, 0) rotate(0deg); }
-    10% { transform: translate(-3px, -4px) rotate(-0.8deg); }
-    20% { transform: translate(4px, 3px) rotate(0.8deg); }
-    30% { transform: translate(-3px, 3px) rotate(-0.8deg); }
-    40% { transform: translate(3px, -4px) rotate(0.8deg); }
-    50% { transform: translate(-4px, 4px) rotate(-0.8deg); }
-    60% { transform: translate(4px, 3px) rotate(0.8deg); }
-    70% { transform: translate(-3px, -4px) rotate(-0.8deg); }
-    80% { transform: translate(4px, 4px) rotate(0.8deg); }
-    90% { transform: translate(-3px, 3px) rotate(-0.8deg); }
-    100% { transform: translate(0, 0) rotate(0deg); }
+@keyframes screenShakeFizzle {
+    0% { transform: translate(0, 0) rotate(0deg); } /* Start calm */
+    5% { transform: translate(-6px, -7px) rotate(-1.5deg); } /* Strongest shake */
+    10% { transform: translate(7px, 6px) rotate(1.5deg); }
+    20% { transform: translate(-5px, 5px) rotate(-1.2deg); }
+    30% { transform: translate(5px, -6px) rotate(1.2deg); }
+    40% { transform: translate(-4px, 4px) rotate(-1deg); }
+    50% { transform: translate(4px, -3px) rotate(1deg); }
+    60% { transform: translate(-2px, 2px) rotate(-0.5deg); }
+    70% { transform: translate(2px, -2px) rotate(0.5deg); }
+    80% { transform: translate(-1px, 1px) rotate(-0.2deg); }
+    90% { transform: translate(1px, -1px) rotate(0.2deg); }
+    100% { transform: translate(0, 0) rotate(0deg); } /* End calm */
 }
 
 .shake {
-    animation: screenShake 0.18s linear; /* Duration of the shake, tied to SHAKE_DURATION_MS in script.js */
+    animation: screenShakeFizzle 0.18s linear; /* Duration tied to SHAKE_DURATION_MS */
+    /* Ensure the animation runs once and stays on the final frame if needed,
+       but for shake, it should return to normal. */
 }

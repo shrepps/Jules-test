@@ -265,9 +265,20 @@ document.addEventListener('DOMContentLoaded', () => {
             console.warn("Could not capture audio track from video. Downloaded video might be silent.");
         }
 
-        const mediaRecorder = new MediaRecorder(mixedStream, {
-            mimeType: 'video/webm; codecs=vp9,opus' // VP9 for video, Opus for audio
-        });
+        const mediaRecorderOptions = {
+            mimeType: 'video/webm; codecs=vp9,opus',
+            videoBitsPerSecond: 2500000 // Suggest 2.5 Mbps for video bitrate
+        };
+
+        // Check if videoBitsPerSecond is supported by the browser for this mimeType
+        if (MediaRecorder.isTypeSupported(mediaRecorderOptions.mimeType) && MediaRecorder.isTypeSupported && !MediaRecorder.isTypeSupported(mediaRecorderOptions.mimeType, { videoBitsPerSecond: mediaRecorderOptions.videoBitsPerSecond })) {
+            console.warn(`Custom videoBitsPerSecond may not be supported for ${mediaRecorderOptions.mimeType}. Using browser default.`);
+            // Fallback or remove videoBitsPerSecond if strict adherence is needed
+            // For now, we'll still pass it, browser might ignore or adjust.
+        }
+
+
+        const mediaRecorder = new MediaRecorder(mixedStream, mediaRecorderOptions);
 
         mediaRecorder.ondataavailable = (event) => {
             if (event.data.size > 0) {
@@ -326,22 +337,38 @@ document.addEventListener('DOMContentLoaded', () => {
             // Apply shake if needed
             const currentTime = videoPlayer.currentTime;
             const timeWindow = Math.max(0.05, SHAKE_DURATION_MS / 1000);
-            let isShakingThisFrame = false;
+            let currentShakeIntensity = 0; // 0 means no shake, 1 means full shake
+            let timeSinceLastApplicableHit = Infinity;
 
             for (let i = 0; i < bassHits.length; i++) {
                 const hit = bassHits[i];
-                 // Check if current time is within [hit.time, hit.time + SHAKE_DURATION_MS/1000]
-                if (currentTime >= hit.time && currentTime < hit.time + (SHAKE_DURATION_MS / 1000)) {
-                    isShakingThisFrame = true;
-                    break;
+                const timeSinceHitStart = currentTime - hit.time;
+
+                // Check if current time is within this hit's shake duration
+                if (timeSinceHitStart >= 0 && timeSinceHitStart < (SHAKE_DURATION_MS / 1000)) {
+                    // Calculate how far into the shake duration we are (0.0 to 1.0)
+                    const progress = timeSinceHitStart / (SHAKE_DURATION_MS / 1000);
+                    // Intensity decreases linearly from 1 to 0 over the duration
+                    const intensityForThisHit = 1.0 - progress;
+
+                    // We want the strongest shake if multiple hits overlap or are very close
+                    if (intensityForThisHit > currentShakeIntensity) {
+                        currentShakeIntensity = intensityForThisHit;
+                    }
                 }
             }
 
-            if (isShakingThisFrame) {
-                const shakeIntensity = 5; // pixels for translation, degrees for rotation
-                const dx = (Math.random() - 0.5) * 2 * shakeIntensity;
-                const dy = (Math.random() - 0.5) * 2 * shakeIntensity;
-                const dAngle = (Math.random() - 0.5) * 2 * (shakeIntensity / 2); // Smaller rotation
+            if (currentShakeIntensity > 0) {
+                // Max shake strength (pixels for translation, degrees for rotation)
+                const maxShakeTranslation = 7;
+                const maxShakeRotation = 1.5; // degrees
+
+                // Modulate actual shake by currentShakeIntensity
+                // Make it more random and less smooth than a simple linear decrease
+                const randomFactor = 0.5 + Math.random() * 0.5; // Add some randomness to magnitude
+                const dx = (Math.random() - 0.5) * 2 * maxShakeTranslation * currentShakeIntensity * randomFactor;
+                const dy = (Math.random() - 0.5) * 2 * maxShakeTranslation * currentShakeIntensity * randomFactor;
+                const dAngle = (Math.random() - 0.5) * 2 * maxShakeRotation * currentShakeIntensity * randomFactor;
 
                 ctx.save();
                 ctx.translate(canvas.width / 2, canvas.height / 2);
