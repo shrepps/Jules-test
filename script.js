@@ -181,8 +181,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Vibration Effect Parameters ---
     // PEAK_THRESHOLD is defined earlier (e.g., 190)
 
-    // Max pixels for vibration displacement.
-    const VIBRATION_MAX_AMPLITUDE = 2;
+    // Max pixels for vibration displacement. Increased for a more pronounced effect.
+    const VIBRATION_MAX_AMPLITUDE = 5;
 
     // Bass energy must be above this threshold for vibration to start.
     // Lowered for more sensitivity to mimic speaker vibration even for quieter bass.
@@ -191,6 +191,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Bass energy level that maps to maximum vibration amplitude.
     // Set to PEAK_THRESHOLD so a detected "peak hit" causes max configured vibration.
     const VIBRATION_ENERGY_MAX_SCALE = PEAK_THRESHOLD * 1.0;
+
+    // Frequency of the visual wobble (e.g., cycles per second).
+    const WOBBLE_FREQUENCY = 5; // Hz - a starting point, can be tuned.
     // --- End Vibration Effect Parameters ---
 
     function applyLiveVibration() {
@@ -205,9 +208,13 @@ document.addEventListener('DOMContentLoaded', () => {
             normalizedEnergy = Math.min(1, (currentBassEnergyForVibration - VIBRATION_ENERGY_THRESHOLD) / (VIBRATION_ENERGY_MAX_SCALE - VIBRATION_ENERGY_THRESHOLD));
         }
 
+        const currentTime = audioContext ? audioContext.currentTime : (performance.now() / 1000);
+
         if (normalizedEnergy > 0) {
-            const dx = (Math.random() - 0.5) * 2 * VIBRATION_MAX_AMPLITUDE * normalizedEnergy;
-            const dy = (Math.random() - 0.5) * 2 * VIBRATION_MAX_AMPLITUDE * normalizedEnergy;
+            // Calculate wobble based on sine wave
+            const angle = currentTime * WOBBLE_FREQUENCY * 2 * Math.PI; // 2*PI for full cycle
+            const dx = Math.sin(angle) * VIBRATION_MAX_AMPLITUDE * normalizedEnergy;
+            const dy = Math.cos(angle) * VIBRATION_MAX_AMPLITUDE * normalizedEnergy; // Use Math.cos for circular/elliptical motion
             videoPlayer.style.transform = `translate(${dx.toFixed(2)}px, ${dy.toFixed(2)}px)`;
         } else {
             videoPlayer.style.transform = 'translate(0, 0)'; // Reset to no shake
@@ -367,14 +374,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 normalizedEnergy = Math.min(1, (currentBassEnergyForVibration - VIBRATION_ENERGY_THRESHOLD) / (VIBRATION_ENERGY_MAX_SCALE - VIBRATION_ENERGY_THRESHOLD));
             }
 
+            // videoPlayer.currentTime is used here for frame synchronization during recording
+            const frameTime = videoPlayer.currentTime;
+
             if (normalizedEnergy > 0) {
-                const dx = (Math.random() - 0.5) * 2 * VIBRATION_MAX_AMPLITUDE * normalizedEnergy;
-                const dy = (Math.random() - 0.5) * 2 * VIBRATION_MAX_AMPLITUDE * normalizedEnergy;
-                // Rotation is omitted for a pure vibration feel, matching the live effect change
+                const angle = frameTime * WOBBLE_FREQUENCY * 2 * Math.PI;
+                const dx = Math.sin(angle) * VIBRATION_MAX_AMPLITUDE * normalizedEnergy;
+                const dy = Math.cos(angle) * VIBRATION_MAX_AMPLITUDE * normalizedEnergy;
 
                 ctx.save();
-                // Apply translation relative to the center for a more natural vibration
-                // Or apply directly if preferred: ctx.translate(dx, dy); ctx.drawImage(videoPlayer, 0,0,...)
                 ctx.translate(dx, dy);
                 ctx.drawImage(videoPlayer, 0, 0, canvas.width, canvas.height);
                 ctx.restore();
